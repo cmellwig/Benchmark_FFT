@@ -1,0 +1,49 @@
+# Kalray Inc.: http://www.kalrayinc.com/
+#
+# Bostan Fast-Fourier Transform Implementation (64K complex-float)
+
+
+# Description:
+#   This distributed FFT implementation uses the 6-step method to split the work
+#   over the compute clusters of the MPPA processor.
+#   The FFT 6-step method well described in [1] page 7.
+#   However our current implementation supports input array multiple of 4 in order
+#   to have square matrix to transpose (transpose is step 1, 3 and 6 of the 6-step)
+#   In this benchmark the IO generates input buffer in the DDR.
+#       The input array is a complex array (1D array) where the imaginary part
+#   is zeros and the real part uses random numbers.
+#   First, the compute clusters get a tile of the 1D array interpreted as a
+#   2D array (tiling).
+#   Second, the CC all execute the 6-step FFTs. All twiddle factors are pre-computed.
+#   Finally the result is writen back to the DDR in the IO which executes
+#   a sequential FFT and performs correctness check.
+
+# References:
+#   [1] 'https://www.nas.nasa.gov/assets/pdf/techreports/1989/rnr-89-004.pdf'
+
+# Performance measures.
+#   We measure performance of both DDR access time (I/O) and the computation
+#   on the MPPA matrix.
+#   There is no batching (batch-1) thus the throughput is the same as the
+#   latency. It is a low-latency implementation.
+#   The time for initializing the LUT of the twiddle factor is not computed
+#   (system initialization).
+
+# Requirements:
+#   Validated with Kalray's AccessCore >= 2.9.0
+
+# Multi-cluster - Matrix topology condition
+#  Only nb_cluster=1, 2, 4, 8 or 16 are supported (selected at build time)
+
+# Intra-cluster
+#   The number of core can be from 1 to 16. (nb_core variable at build time)
+
+# How to execute on MPPA hardware
+#   By default 16 clusters and 16 cores in each cluster are used.
+#   Using only jtag (no pcie, standalone mode)
+
+make nb_core=<NUM_CORE> nb_cluster=<NUM_CLUSTER> [stand_alone_board=<ab01|ab04>] run_jtag
+
+# Using pcie
+
+make nb_core=<NUM_CORE> nb_cluster=<NUM_CLUSTER> run_pcie
