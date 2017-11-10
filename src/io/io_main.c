@@ -35,6 +35,10 @@
 #include "config.h"
 #include "fft_kernels.h"
 
+
+/** Error threshold for comparison between computed value and reference */
+#define TEST_THRESHOLD (0.1)
+
 void
 fft_radix_2_float_reference(cplx_float_t *in, int len)
 {
@@ -98,6 +102,49 @@ fft_radix_2_float_reference(cplx_float_t *in, int len)
 	}
 }
 
+/** Check if absolute difference between matrix_out coefficients and matrix_check
+ *  ones exceed TEST_THRESHOLD
+ *  @param[inout] real_diff value of the maximal absolute diff between
+ *                          real coeffs (MUST be init with 0.f)
+ *  @param[inout] im_diff value of the maximal absolute diff between
+ *                          imaginary coeffs (MUST be init with 0.f)
+ */
+int check_result_matrix(cplx_float_t* matrix_out, cplx_float_t* matrix_check,
+                        float* real_diff, float* im_diff)
+{
+    // number of differences
+    int diff = 0;
+
+	for(int ii=0;ii<HEIGHT;ii++)
+	{
+		for(int jj=0;jj<WIDTH;jj++)
+		{
+			float abs_diff = fabs(matrix_out[ii*HEIGHT + jj].x-matrix_check[ii*HEIGHT + jj].x);
+			if( abs_diff > TEST_THRESHOLD || isnan(matrix_out[ii*HEIGHT + jj].x) )
+			{
+				diff++;
+			}
+			if(abs_diff > *real_diff)
+				*real_diff = diff;
+		}
+	}
+	for(int ii=0;ii<HEIGHT;ii++)
+	{
+		for(int jj=0;jj<WIDTH;jj++)
+		{
+			float abs_diff =  fabs(matrix_out[ii*HEIGHT + jj].y -matrix_check[ii*HEIGHT + jj].y);
+			if( abs_diff > TEST_THRESHOLD || isnan(matrix_out[ii*HEIGHT + jj].y) )
+			{
+				diff++;
+			}
+			if(abs_diff > *im_diff)
+				*im_diff = diff;
+		}
+	}
+
+    return diff;
+}
+
 
 int main() {
 	mppadesc_t pcie_fd = 0;
@@ -126,9 +173,19 @@ int main() {
 	posix_memalign((void*)&matrix, 1<<13, matrix_size);
 	posix_memalign((void*)&matrix_out, 1<<13, matrix_size);
 	posix_memalign((void*)&matrix_check, 1<<13, matrix_size);
-	assert(matrix != NULL && "matrix failed alloc\n");
-	assert(matrix_out != NULL && "matrix_out failed alloc\n");
-	assert(matrix_check != NULL && "matrix_check failed alloc\n");
+
+    if (!matrix) {
+        printf("ERROR: failed to allocate matrix\n");
+        return -1;
+    }
+    if (!matrix_out) {
+        printf("ERROR: failed to allocate matrix_out\n");
+        return -1;
+    }
+    if (!matrix_check) {
+        printf("ERROR: failed to allocate matrix_check\n");
+        return - 1;
+    }
 
 	{	
 		float v = 0;
@@ -162,39 +219,13 @@ int main() {
 		return -1;
 
 	printf("# IO%d starts checking. Please wait.\n", __k1_get_cluster_id());
-	int diff = 0;
 	mOS_dinval();
 	assert(HEIGHT == WIDTH);
 	fft_radix_2_float_reference(matrix_check, WIDTH*HEIGHT);
-	float real_diff = 0;
-	float im_diff = 0;
-	#define TEST_THRESHOLD (0.1)
-	for(int ii=0;ii<HEIGHT;ii++)
-	{
-		for(int jj=0;jj<WIDTH;jj++)
-		{
-			float difff = fabs(matrix_out[ii*HEIGHT + jj].x-matrix_check[ii*HEIGHT + jj].x);
-			if( difff > TEST_THRESHOLD || isnan(matrix[ii*HEIGHT + jj].x) )
-			{
-				diff++;
-			}
-			if(difff > real_diff)
-				real_diff = diff;
-		}
-	}
-	for(int ii=0;ii<HEIGHT;ii++)
-	{
-		for(int jj=0;jj<WIDTH;jj++)
-		{
-			float difff =  fabs(matrix_out[ii*HEIGHT + jj].y -matrix_check[ii*HEIGHT + jj].y);
-			if( difff > TEST_THRESHOLD || isnan(matrix[ii*HEIGHT + jj].y) )
-			{
-				diff++;
-			}
-			if(difff > im_diff)
-				im_diff = diff;
-		}
-	}
+
+    float im_diff = 0.f;
+    float real_diff = 0.f;
+	int diff = check_result_matrix(matrix_out, matrix_check, &real_diff, &im_diff);
 
 	char string[30];
 	if(diff)
@@ -207,9 +238,8 @@ int main() {
 	if(diff)
 	{
 		printf("# [IODDR0] real_diff %e im_diff %e diff %d %s\n", real_diff, im_diff, diff, string);
+        return -1;
 	}
-
-	assert(diff == 0 && "Failed");
 
 	/* Send an exit message on pcie interface */
 	if (__k1_spawn_type() == __MPPA_PCI_SPAWN) {
