@@ -86,7 +86,11 @@ void dump_submatrix(cplx_float_t *m, int width, int height)
 	mppa_rpc_barrier_all();
 }
 
-void
+/**
+ *
+ * @return 0 on success, non-zero error code otherwise
+ */
+int
 flat_transpose(void* local, void *target)
 {
 	cplx_float_t (*sub_local_a)[TILE_WIDTH] = local;
@@ -104,11 +108,22 @@ flat_transpose(void* local, void *target)
 			int j;
 			for(j=0;j<TILE_HEIGHT;j++)
 			{
-				if(mppa_async_sput_spaced(((void*)sub_local_a) + sizeof(submatrix_a[0][0][0])*TILE_WIDTH/NB_CLUSTER*target_cid + sizeof(submatrix_a[0][0][0])*j,
-					mppa_async_default_segment(target_cid), offset + sizeof(submatrix_a[0][0][0])*TILE_WIDTH/NB_CLUSTER*cid + sizeof(submatrix_a[0][0][0])*TILE_WIDTH*j,
-					sizeof(submatrix_a[0][0][0]), TILE_WIDTH/NB_CLUSTER, sizeof(submatrix_a[0][0][0])*TILE_WIDTH, sizeof(submatrix_a[0][0][0]), &evt) != 0)
+				void* local_addr = ((void*)sub_local_a) + \
+						 sizeof(submatrix_a[0][0][0]) * \
+						 TILE_WIDTH/NB_CLUSTER*target_cid
+						 + sizeof(submatrix_a[0][0][0])*j;
+				off64_t remote_addr =  offset + \
+					 sizeof(submatrix_a[0][0][0]) * TILE_WIDTH / NB_CLUSTER*cid\
+					 + sizeof(submatrix_a[0][0][0])*TILE_WIDTH*j;
+				if(mppa_async_sput_spaced(local_addr,
+						mppa_async_default_segment(target_cid),
+						remote_addr,
+						sizeof(submatrix_a[0][0][0]), TILE_WIDTH/NB_CLUSTER,
+						sizeof(submatrix_a[0][0][0])*TILE_WIDTH,
+						sizeof(submatrix_a[0][0][0]), &evt) != 0)
 				{
 					printf("mppa_async_sput_spaced cid %d failed\n", cid);
+					return -1;
 				}
 				nb_job_dma++;
 			}
@@ -130,6 +145,8 @@ flat_transpose(void* local, void *target)
 	mppa_async_event_wait(&evt);
 	mppa_async_evalcond(&go, NB_CLUSTER, MPPA_ASYNC_COND_GE, NULL);
 	__builtin_k1_afdau(&go, -NB_CLUSTER);
+
+	return 0;
 }
 
 typedef struct{
@@ -301,7 +318,8 @@ int main(void/*unused*/)
 					TILE_WIDTH*sizeof(submatrix_a[0][0][0]), TILE_HEIGHT, TILE_WIDTH*sizeof(submatrix_a[0][0][0]), NULL);
 		comm += __k1_read_dsu_timestamp() - tmp_dsu;
 
-		flat_transpose(submatrix_a[buffer], submatrix_b[buffer]);
+		int err = flat_transpose(submatrix_a[buffer], submatrix_b[buffer]);
+        if (err) return err; 
 		#ifdef DEBUG_DUMP
 		dump_submatrix((void*)submatrix_b[buffer], TILE_WIDTH, TILE_HEIGHT);
 		s0 = __k1_read_dsu_timestamp();
@@ -313,7 +331,8 @@ int main(void/*unused*/)
 		s1 = __k1_read_dsu_timestamp();
 		#endif
 
-		flat_transpose(submatrix_b[buffer], submatrix_a[buffer]);
+		err = flat_transpose(submatrix_b[buffer], submatrix_a[buffer]);
+        if (err) return err; 
 		#ifdef DEBUG_DUMP
 		dump_submatrix((void*)submatrix_a[buffer], TILE_WIDTH, TILE_HEIGHT);
 		s2 = __k1_read_dsu_timestamp();
@@ -331,7 +350,8 @@ int main(void/*unused*/)
 		s4 = __k1_read_dsu_timestamp();
 		#endif
 
-		flat_transpose(submatrix_a[buffer], submatrix_b[buffer]);
+		err = flat_transpose(submatrix_a[buffer], submatrix_b[buffer]);
+        if (err) return err; 
 
 		tmp_dsu = __k1_read_dsu_timestamp();
 		mppa_async_put_spaced(submatrix_b[buffer], &matrix_segment_out, cid*TILE_WIDTH*TILE_HEIGHT*sizeof(submatrix_a[0][0][0]), 
